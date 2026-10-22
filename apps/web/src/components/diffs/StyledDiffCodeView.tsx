@@ -1,3 +1,4 @@
+import { File, FileDiff } from "@pierre/diffs";
 /* oxlint-disable eslint/no-restricted-imports -- This is the single styled adapter around Pierre's raw viewer. */
 import {
   CodeView,
@@ -11,6 +12,7 @@ import type { Ref } from "react";
 
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
+import { useDiffTextCopy } from "./useDiffTextCopy";
 
 export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 /* A 1fr track's automatic minimum grows with the currently mounted lines. In split
@@ -224,6 +226,7 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   unsafeCSSExtra,
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
+  const onCopyPostRender = useDiffTextCopy<LAnnotation>();
   return (
     <DiffWorkerPoolProvider>
       <CodeView<LAnnotation>
@@ -236,6 +239,14 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
         }
         options={{
           ...options,
+          onPostRender: (node, instance, phase, context) => {
+            onCopyPostRender(node, instance, phase, context);
+            if (instance instanceof FileDiff && context.type === "diff") {
+              options?.onPostRender?.(node, instance, phase, context);
+            } else if (instance instanceof File && context.type === "file") {
+              options?.onPostRender?.(node, instance, phase, context);
+            }
+          },
           unsafeCSS: unsafeCSSExtra
             ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
             : DIFF_VIEW_UNSAFE_CSS,

@@ -867,10 +867,71 @@ index 6e7b486..5b7290f 100644
  		connectedCallback() {
  			const shadowRoot = this.shadowRoot ?? this.attachShadow({ mode: "open" });
 diff --git a/dist/editor/editor.js b/dist/editor/editor.js
-index 8f04a6f..c203023 100644
+index 8f04a6f..c08be25 100644
 --- a/dist/editor/editor.js
 +++ b/dist/editor/editor.js
-@@ -1899,7 +1899,11 @@ var Editor = class {
+@@ -977,17 +977,25 @@ var Editor = class {
+ 				if (typeof selectionRaw.getComposedRanges === "function") composedRange = selectionRaw.getComposedRanges({ shadowRoots: [shadowRoot] })?.[0];
+ 				else composedRange = getShadowRootRange(shadowRoot);
+ 				if (composedRange === void 0 || !this.#rangeBelongsToEditor(composedRange)) return;
+-				const selection = convertSelection(composedRange, 0);
++				let selection = convertSelection(composedRange, 0);
+ 				if (selection === void 0) return;
+ 				if (this.#isContentMouseDown && this.#shiftKeyPressed && this.#selections !== void 0 && this.#selections.length > 0) {
+ 					const primarySelection = this.#selections.at(-1);
+ 					this.#updateSelections([extendSelection(primarySelection, selection)]);
+ 					return;
+ 				}
+-				if (this.#selectionStart !== void 0) selection.direction = createSelectionFrom(this.#selectionStart, selection).direction;
++				if (this.#selectionStart !== void 0) {
++					// Virtualization unmounts the row a long drag started on, and the browser then moves the
++					// selection anchor onto the first mounted row. Keep the drag's own anchor instead.
++					const dragAnchor = this.#selectionStart.direction === -1 ? this.#selectionStart.end : this.#selectionStart.start;
++					if (this.#isContentMouseDown && !this.#isLineInRenderRange(dragAnchor.line)) selection = createSelectionFrom(this.#selectionStart, selection);
++					else selection.direction = createSelectionFrom(this.#selectionStart, selection).direction;
++				}
+ 				else if (this.#isContentMouseDown) this.#selectionStart = selection;
+ 				else if (this.#selections !== void 0 && this.#selections.length === 1) {
+ 					const previous = this.#selections[0];
++					// Unmounting a selected row moves the DOM caret; keep the document selection until the next gesture.
++					if (!this.#isLineInRenderRange(previous.start.line) || !this.#isLineInRenderRange(previous.end.line)) return;
+ 					if (comparePosition(previous.start, selection.start) === 0 && comparePosition(previous.end, selection.end) === 0) selection.direction = previous.direction;
+ 				}
+ 				if (this.#altColumnDrag !== void 0) {
+@@ -1102,6 +1110,23 @@ var Editor = class {
+ 					const primarySelection = this.#selections?.at(-1);
+ 					if (primarySelection !== void 0) {
+ 						const pos = primarySelection.direction === -1 ? primarySelection.end : primarySelection.start;
++						if (!this.#isLineInRenderRange(pos.line)) {
++							const shadowRoot = this.#fileContainer?.shadowRoot;
++							const caret = shadowRoot == null ? null : document.caretPositionFromPoint?.(e.clientX, e.clientY, { shadowRoots: [shadowRoot] });
++							if (caret != null && contentEl.contains(caret.offsetNode)) {
++								const range = document.createRange();
++								range.setStart(caret.offsetNode, caret.offset);
++								range.collapse(true);
++								const focus = convertSelection(range, 0);
++								if (focus != null) {
++									// Native Shift+click cannot extend from an anchor whose DOM row was unmounted.
++									this.#updateSelections([extendSelection(primarySelection, focus)]);
++									this.#shiftKeyPressed = true;
++									e.preventDefault();
++									return;
++								}
++							}
++						}
+ 						this.#setWindowSelection({
+ 							start: pos,
+ 							end: pos,
+@@ -1110,7 +1135,7 @@ var Editor = class {
+ 					}
+ 					this.#shiftKeyPressed = true;
+ 				}
+-			}, { passive: true }),
++			}, { passive: false }),
+ 			addEventListener(contentEl, "keydown", (e) => {
+ 				if (!targetIsContentElement(e)) return;
+ 				this.#canMountSelectionAction = true;
+@@ -1899,7 +1924,11 @@ var Editor = class {
  			changedDocumentLines: this.#isDiff && !didLineCountChange ? getChangedDocumentLines(textDocument, change) : void 0,
  			documentLineCount: textDocument.lineCount
  		});
